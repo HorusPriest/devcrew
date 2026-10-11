@@ -1,0 +1,51 @@
+{
+  "_comment": "FICTIONAL example data for tests and the smoke run. These models, providers and numbers do not exist. Never use this file for a real pick.",
+  "fictional": true,
+  "generated_at": "2026-01-15T00:00:00Z",
+  "price_unit": "USD per million tokens, list price",
+  "sources": {
+    "example-board": {"url": "https://example.com/leaderboard", "retrieved_at": "2026-01-15T00:00:00Z"},
+    "example-pricing": {"url": "https://example.com/pricing", "retrieved_at": "2026-01-15T00:00:00Z"}
+  },
+  "models": [
+    {
+      "id": "model-a",
+      "provider": "provider-x",
+      "released": "2025-11-01",
+      "price": {"input_per_mtok": 3.0, "output_per_mtok": 15.0},
+      "scores": {
+        "implementation": {"score": 80.0, "source": "example-board"},
+        "code-review": {"score": 82.0, "source": "example-board"},
+        "evidence-and-measurement": {"score": 75.0, "source": "example-board"},
+        "long-form-writing": {"score": 78.0, "source": "example-board"},
+        "classification": {"score": 70.0, "source": "example-board"}
+      }
+    },
+    {
+      "id": "model-b",
+      "provider": "provider-y",
+      "released": "2025-12-01",
+      "price": {"input_per_mtok": 1.0, "output_per_mtok": 5.0},
+      "scores": {
+        "implementation": {"score": 74.0, "source": "example-board"},
+        "code-review": {"score": 70.0, "source": "example-board"},
+        "evidence-and-measurement": {"score": 72.0, "source": "example-board"},
+        "long-form-writing": {"score": 80.0, "source": "example-board"},
+        "classification": {"score": 72.0, "source": "example-board"}
+      }
+    },
+    {
+      "id": "model-c",
+      "provider": "provider-x",
+      "released": "2025-10-01",
+      "price": {"input_per_mtok": 0.2, "output_per_mtok": 1.0},
+      "scores": {
+        "implementation": {"score": 55.0, "source": "example-board"},
+        "code-review": {"score": 50.0, "source": "example-board"},
+        "evidence-and-measurement": {"score": 60.0, "source": "example-board"},
+        "long-form-writing": {"score": 62.0, "source": "example-board"},
+        "classification": {"score": 69.0, "source": "example-board"}
+      }
+    }
+  ]
+}

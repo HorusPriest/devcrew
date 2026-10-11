@@ -1,0 +1,41 @@
+{
+  "_comment": "Copy to task-classes.json and edit. Class names must match the score keys in your benchmark pack. No model ids belong here: the pick always comes from the pack.",
+  "pack_max_age_days": 14,
+  "cap_weight": 1.0,
+  "classes": {
+    "implementation": {
+      "description": "Writing and changing code against a ticket.",
+      "price_weight": 0.15,
+      "price_blend": {"input": 3, "output": 1}
+    },
+    "code-review": {
+      "description": "Reviewing a diff against a ticket's Scope, Pinned decisions and Not-mine.",
+      "price_weight": 0.1,
+      "price_blend": {"input": 4, "output": 1}
+    },
+    "evidence-and-measurement": {
+      "description": "Running checks, reading logs and reporting what was measured.",
+      "price_weight": 0.4,
+      "price_blend": {"input": 3, "output": 1}
+    },
+    "long-form-writing": {
+      "description": "Docs, guides, ticket write-ups and debriefs.",
+      "price_weight": 0.5,
+      "price_blend": {"input": 1, "output": 2}
+    },
+    "classification": {
+      "description": "Sorting, labelling and routing short items in bulk.",
+      "price_weight": 1.0,
+      "price_blend": {"input": 5, "output": 1}
+    }
+  },
+  "data_policy": {
+    "_comment": "A data class marked sensitive may only go to the providers listed for it under allowed_providers. An unlisted or empty entry means REFUSE. An unknown data class is refused too.",
+    "data_classes": {
+      "general": {"sensitive": false, "description": "Public code and text with nothing confidential in it."},
+      "client-data": {"sensitive": true, "description": "Anything a client gave you or that identifies a client."},
+      "financials": {"sensitive": true, "description": "Prices, invoices, budgets, account data."}
+    },
+    "allowed_providers": {}
+  }
+}

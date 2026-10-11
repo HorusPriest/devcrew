@@ -1,0 +1,25 @@
+{
+  "_comment": "Copy to gateway/routes.json and edit. The model ids below are FICTIONAL placeholders: replace them with the OpenCode model ids you approve. An id containing claude or anthropic is always refused. A data class is sensitive unless it says \"sensitive\": false, and a sensitive class reaches OpenCode only if it lists opencode under approved_providers.",
+  "port": 8787,
+  "providers": {
+    "opencode": {
+      "models": ["example-coder-large", "example-coder-small"]
+    }
+  },
+  "data_classes": {
+    "general": {
+      "sensitive": false,
+      "description": "Public code and text with nothing confidential in it."
+    },
+    "internal": {
+      "sensitive": true,
+      "approved_providers": [],
+      "description": "Your own unpublished code. Add \"opencode\" here only after you have read OpenCode's data terms."
+    },
+    "client-data": {
+      "sensitive": true,
+      "approved_providers": [],
+      "description": "Anything a client gave you or that identifies a client."
+    }
+  }
+}

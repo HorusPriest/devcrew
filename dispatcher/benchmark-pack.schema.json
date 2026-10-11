@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Benchmark pack",
+  "description": "One dated file written by your own sync script: per model, a quality score per task class and the current price. dispatch.py reads it and refuses it when it is older than the configured number of days.",
+  "type": "object",
+  "required": ["generated_at", "price_unit", "sources", "models"],
+  "properties": {
+    "generated_at": {
+      "description": "When the sync wrote this pack, ISO 8601 with a time zone.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "price_unit": {
+      "description": "What the price numbers mean, for example \"USD per million tokens, list price\".",
+      "type": "string",
+      "minLength": 1
+    },
+    "fictional": {
+      "description": "True for example data that must never be used for a real pick.",
+      "type": "boolean"
+    },
+    "sources": {
+      "description": "Every source a score came from, keyed by a short name.",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["url", "retrieved_at"],
+        "properties": {
+          "url": {"type": "string", "minLength": 1},
+          "retrieved_at": {"type": "string", "format": "date-time"},
+          "notes": {"type": "string"}
+        }
+      }
+    },
+    "models": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "provider", "price", "scores"],
+        "properties": {
+          "id": {"description": "The model id exactly as the provider names it today.", "type": "string", "minLength": 1},
+          "provider": {"description": "Who receives the data when this model runs; matched against data_policy.allowed_providers.", "type": "string", "minLength": 1},
+          "released": {"type": "string", "format": "date"},
+          "price": {
+            "type": "object",
+            "required": ["input_per_mtok", "output_per_mtok"],
+            "properties": {
+              "input_per_mtok": {"type": "number", "minimum": 0},
+              "output_per_mtok": {"type": "number", "minimum": 0}
+            }
+          },
+          "scores": {
+            "description": "Quality per task class, keyed by the class names in task-classes.json.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["score", "source"],
+              "properties": {
+                "score": {"type": "number", "minimum": 0, "maximum": 100},
+                "source": {"description": "A key of the top-level sources object.", "type": "string"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
