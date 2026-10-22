@@ -387,6 +387,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ---- the request ----
 
+    def handle_expect_100(self):
+        # parse_request is still recording headers when the standard library calls this hook.
+        self.raw_header_lines = self.rfile.lines
+        try:
+            self.check_request_headers()
+        except Refused as e:
+            self.close_connection = True
+            self.gateway.log({"route": "refused", "reason": e.code, "model_requested": None,
+                              "model_reported": None, "status": 403, "run_id": None})
+            self.send_constant(403, "refused by the gateway: %s" % e.code, "permission_error")
+            return False
+        return super().handle_expect_100()
+
     def handle_any(self):
         self.close_connection = True  # one request per connection: an unread body is never parsed as a request
         rec = {"route": "refused", "reason": None, "model_requested": None, "model_reported": None,
@@ -401,7 +414,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         finally:
             self.gateway.log(rec)
 
-    def route(self, rec):
+    def check_request_headers(self):
         if self.request_version == "HTTP/0.9":
             raise Refused("http09")
         fields = parse_field_lines(self.raw_header_lines)
@@ -415,6 +428,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise Refused("origin")
         if self.command == "OPTIONS":
             raise Refused("options")
+
+    def route(self, rec):
+        self.check_request_headers()
+        fields = self.fields
         if not self.path.startswith("/"):
             raise Refused("path")
         if any(fields.get_all(name) is not None for name in ROUTE_HEADERS):

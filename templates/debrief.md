@@ -17,3 +17,5 @@ Post this as the last comment on the project after a builder session closes. The
 ## Rule to change
 
 <One rule to add, sharpen or delete in the project rules file or the runbook template, and the evidence for it.>
+
+<!-- devcrew template debrief.md, release 2 -->

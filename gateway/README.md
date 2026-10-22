@@ -18,6 +18,10 @@ An OpenCode request passes only when all of these hold:
 7. exactly one `x-data-class` naming a class in your routes file. A class is sensitive unless it says exactly `"sensitive": false`, and a sensitive class passes only if it lists `opencode` under `approved_providers`;
 8. `OPENCODE_API_KEY` was set in the gateway's environment when it started.
 
+The calling session sets its own data-class label. The gateway validates that label against
+your policy; it does not inspect the request's content to decide its sensitivity. Set the
+label for the actual data in the task, rather than copying `general` from the example blindly.
+
 Before any of that, and before it reads any body, the gateway refuses every HTTP/0.9 request and every request whose header block is not made only of plain header lines (each a name, a colon and a value, with no folded line, no stray CR, no space before the colon and no non-ASCII name), every request whose `Host` is not exactly `127.0.0.1:<port>` or `localhost:<port>`, every request that carries an `Origin` header, and every `OPTIONS` request. The gateway reads those lines itself and routes on what it read, never on Python's header parser: that parser stops at a malformed line and silently drops the route headers after it, and its handling of folded lines differs between Python versions. It never sends an `Access-Control-*` header and strips any it receives. Together these keep web pages in your browser from using it.
 
 What goes upstream on the OpenCode route is built by the gateway: your key as `Authorization: Bearer` and `x-api-key`, a fixed `User-Agent`, `content-type` and `anthropic-version`. The credentials Claude Code sends, the gateway token and the route headers are never forwarded. The gateway checks the answer before you see it:
@@ -30,6 +34,15 @@ What goes upstream on the OpenCode route is built by the gateway: your key as `A
 - OpenCode's own error text is never relayed.
 
 The upstream endpoints are constants in `gateway.py`: `https://api.anthropic.com` and OpenCode's Anthropic-compatible messages endpoint, `https://opencode.ai/zen/go/v1/messages`. No flag or config value changes them. Check that endpoint against OpenCode's documentation before you rely on it.
+
+Only models served on OpenCode's `/v1/messages` endpoint work through this gateway. Approving
+an id does not convert its API: a model served only on another endpoint will fail upstream.
+Consult the [current model list](https://opencode.ai/zen/go/v1/models) and
+[OpenCode Go documentation](https://opencode.ai/docs/go/) when choosing ids. No startup
+compatibility check is performed.
+
+After the route is approved, the request body goes upstream byte for byte, including any
+system prompt or `metadata` fields. The header filtering does not remove fields from the body.
 
 ## Set it up
 
@@ -58,7 +71,11 @@ export ANTHROPIC_SMALL_FAST_MODEL=<the same id>
 claude --model <the same approved OpenCode model id>
 ```
 
-`ANTHROPIC_CUSTOM_HEADERS` takes one `Name: value` header per line, and Claude Code adds them to every request, including its background calls. Claude Code's small, fast background model is set with `ANTHROPIC_DEFAULT_HAIKU_MODEL`; older releases read `ANTHROPIC_SMALL_FAST_MODEL`, and current ones still read it first when it is set, so set both to the approved id. Background calls then go to the same approved model instead of being refused. If you use subagents that ask for another model tier, set `ANTHROPIC_DEFAULT_SONNET_MODEL` and `ANTHROPIC_DEFAULT_OPUS_MODEL` to the approved id too; otherwise those calls are refused, never sent elsewhere.
+The example uses one `Name: value` header per line in `ANTHROPIC_CUSTOM_HEADERS`. Model-variable
+support and precedence depend on your installed client version; check its documentation.
+For clients that honor the model variables above, set both to the approved id for background
+calls. If subagents request another tier, configure that tier's model variable as well.
+Any request that names an unapproved model is refused rather than sent elsewhere.
 
 Expect refusals for anything the OpenCode route does not carry, such as token counting.
 

@@ -1,3 +1,6 @@
 gateway/routes.json
 gateway/gateway.log
 __pycache__/
+dispatcher/pack.json
+dispatcher/task-classes.json
+tools/review.config.json

@@ -11,6 +11,8 @@ Copy this file to the root of your repo as `CLAUDE.md` and fill in the project s
 
 ## Roles
 
+- **Session start:** run `python <kit>/tools/check_version.py`, with `<kit>` set to your clone folder, and report its first line.
+
 - **Planners never build.** A planner session writes tickets and runbooks, reviews what builders report and keeps these rules current. It does not edit code.
 - **Builders build one runbook.** A builder works only the tickets its runbook names, gets every code change reviewed, commits, and reports back on the ticket.
 - **Every diff gets an independent review** by a different model before it counts as done. No skipping, no waiving, no downgrading.
@@ -32,3 +34,5 @@ Copy this file to the root of your repo as `CLAUDE.md` and fill in the project s
 ## Project-specific rules
 
 - <add rules here as debriefs teach them; date each one>
+
+<!-- devcrew template CLAUDE.md, release 2 -->

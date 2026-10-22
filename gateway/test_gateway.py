@@ -872,6 +872,25 @@ class TestOpenCodeRoute(GatewayCase):
 
 
 class TestRefusals(GatewayCase):
+    def test_expect_continue_refusals_precede_provisional_response(self):
+        cases = [("host", b"POST", b"evil.example", []),
+                 ("origin", b"POST", self.host.encode(), [b"Origin: https://evil.example"]),
+                 ("options", b"OPTIONS", self.host.encode(), [])]
+        for reason, method, host, extra in cases:
+            with self.subTest(reason=reason):
+                lines = [method + b" /v1/messages HTTP/1.1", b"Host: " + host,
+                         b"Expect: 100-continue", b"Content-Length: 1"] + self.oc_lines() + extra
+                status, response = self.raw(b"\r\n".join(lines) + b"\r\n\r\n")
+                self.assertNotIn(b"100 Continue", response)
+                self.assertEqual(status, 403, response)
+                self.assertEqual(self.last_log().get("reason"), reason)
+                self.assertEqual((self.default.received, self.opencode.received), ([], []))
+        _, accepted = self.raw(self.raw_oc_request(self.oc_lines() + [b"Expect: 100-continue"]))
+        provisional, final = accepted.split(b"\r\n\r\n", 1)
+        self.assertIn(b"100 Continue", provisional)
+        self.assertTrue(final.startswith(b"HTTP/1.1 200"), final)
+        self.assertEqual(len(self.opencode.received), 1)
+
     def test_refuse_foreign_host(self):
         self.assert_refused("host", host="evil.example:%d" % self.gw.port)
 

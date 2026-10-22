@@ -6,14 +6,17 @@ Usage:
   python smoke.py --selftest  also run checks that must fail (an injected failure, and parse_output
                               on a deliberately broken sample), to show the run exits non-zero
 
-Everything runs in temporary directories; nothing is written into this repo
-and nothing goes over the network (the gateway tests use loopback stubs only). Python standard library only.
+Fixtures and subprocess output stay in temporary directories. Run with python -B
+to keep in-process imports from writing bytecode here. Only the version check reads
+release tags over the network; it reports UNKNOWN offline. Gateway tests use loopback
+stubs only. Python standard library only.
 """
 import importlib.util
 import json
 import ntpath
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +30,7 @@ DISPATCH = os.path.join(ROOT, "dispatcher", "dispatch.py")
 CLASSES = os.path.join(ROOT, "dispatcher", "task-classes.example.json")
 PACK = os.path.join(ROOT, "dispatcher", "fixtures", "pack.example.json")
 GATEWAY_TESTS = os.path.join(ROOT, "gateway", "test_gateway.py")
+VERSION_CHECK = os.path.join(ROOT, "tools", "check_version.py")
 MEMORY_OVERRIDES = ["features.memories=false", "memories.generate_memories=false", "memories.use_memories=false"]
 GIT_QUIET = ["-c", "user.name=smoke", "-c", "user.email=smoke@example.invalid", "-c", "commit.gpgsign=false"]
 
@@ -46,6 +50,70 @@ def check_gate_selftest():
     rc, out = run([PY, "-B", GATE, "--selftest"])
     ok = rc == 0 and "SELFTEST PASS" in out and out.count("as expected") >= 3
     return ok, "exit %d; %s" % (rc, out.strip().splitlines()[-1] if out.strip() else "no output")
+
+
+def check_version_controls(checker=None):
+    with tempfile.TemporaryDirectory() as tmp:
+        remote, _ = make_scratch_repo(tmp)
+        for number in (1, 2, 3):
+            subprocess.run(["git", "-C", remote] + GIT_QUIET
+                           + ["-c", "tag.gpgsign=false", "tag", "release-%d" % number],
+                           capture_output=True, check=True, env=ENV)
+        kit = os.path.join(tmp, "kit")
+        os.makedirs(os.path.join(kit, "tools"))
+        os.makedirs(os.path.join(kit, "templates"))
+        target = os.path.join(kit, "tools", "check_version.py")
+        shutil.copyfile(checker or VERSION_CHECK, target)
+        with open(os.path.join(kit, "templates", "HISTORY.json"), "w", encoding="utf-8") as f:
+            json.dump({"1": ["CLAUDE.md", "runbook.md", "ticket.md", "debrief.md"],
+                       "2": ["CLAUDE.md"], "3": []}, f)
+        copies = [os.path.join(tmp, name) for name in ("renamed-rules.md", "unstamped.md", "unknown.md", "current.md")]
+        contents = ["<!-- devcrew template CLAUDE.md, release 1 -->\n\n", "local rules\n",
+                    "<!-- devcrew template alien.md, release 1 -->\n",
+                    "<!-- devcrew template CLAUDE.md, release 3 -->\n"]
+        for path, content in zip(copies, contents):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+        cases = [(1, remote, "BEHIND by 2 releases: local 1, newest 3"),
+                 (3, remote, "CURRENT release 3"),
+                 (4, remote, "UNKNOWN: local release 4 is newer than the newest tag 3"),
+                 (3, os.path.join(tmp, "absent-remote"), "UNKNOWN:")]
+        passed, details = True, []
+        for number, source, expected in cases:
+            with open(os.path.join(kit, "VERSION"), "w", encoding="utf-8") as f:
+                f.write("%d\n" % number)
+            rc, out = run([PY, "-B", target, "--remote", source, "--copied"] + copies)
+            lines = out.splitlines()
+            first = lines[0] if lines else ""
+            status_ok = first.startswith(expected) if expected == "UNKNOWN:" else first == expected
+            incomplete = "INCOMPLETE: template history is local release %d; update the kit and run again" % number
+            good = (rc == 0 and status_ok
+                    and "STALE %s: CLAUDE.md copied from release 1, changed in release 2" % copies[0] in lines
+                    and "UNSTAMPED %s" % copies[1] in lines
+                    and "UNKNOWN TEMPLATE %s" % copies[2] in lines
+                    and not any(copies[3] in line for line in lines)
+                    and ((incomplete in lines) == (not first.startswith("CURRENT")))
+                    and (not first.startswith("BEHIND") or any(line.startswith("update: git -C ") for line in lines)))
+            details.append("release %d: %s, expected=%s" % (number, first, good))
+            print("VERSION CONTROL exit %d:\n%s" % (rc, out.rstrip()))
+            passed = passed and good
+        # Removing an intermediate tag must leave the arithmetic difference unchanged.
+        subprocess.run(["git", "-C", remote, "tag", "-d", "release-2"], capture_output=True, check=True, env=ENV)
+        with open(os.path.join(kit, "VERSION"), "w", encoding="utf-8") as f:
+            f.write("1\n")
+        rc, out = run([PY, "-B", target, "--remote", remote])
+        gap_ok = rc == 0 and out.splitlines()[0] == "BEHIND by 2 releases: local 1, newest 3"
+        print("VERSION CONTROL tag gap exit %d:\n%s" % (rc, out.rstrip()))
+        return passed and gap_ok, "; ".join(details + ["tag-gap arithmetic=%s" % gap_ok])
+
+
+def check_version():
+    rc, out = run([PY, "-B", VERSION_CHECK])
+    first = out.splitlines()[0] if out.splitlines() else ""
+    print(first)
+    status_ok = rc == 0 and first.startswith(("CURRENT release ", "BEHIND by ", "UNKNOWN:"))
+    controls_ok, details = check_version_controls()
+    return status_ok and controls_ok, "live exit %d; %s; %s" % (rc, first, details)
 
 
 def check_dispatch_pick():
@@ -119,7 +187,7 @@ def check_review_dry_run():
         repo, ctx = make_scratch_repo(tmp)
         empty_cfg = os.path.join(tmp, "no-config.json")
         rc, out = run([PY, "-B", REVIEW, "--repo", repo, "--paths", "app.py", "--context", ctx,
-                       "--config", empty_cfg, "--dry-run"])
+                       "--config", empty_cfg, "--data-class", "general", "--policy", CLASSES, "--dry-run"])
         lines = out.splitlines()
         cmd = []
         for i, line in enumerate(lines):
@@ -169,7 +237,8 @@ def check_review_contamination():
         rounds = os.path.join(rounds_dir, "rounds.json")
         codex = fake_codex(tmp)
         base = [PY, "-B", REVIEW, "--repo", repo, "--paths", "app.py", "--context", ctx, "--rounds", rounds,
-                "--config", os.path.join(tmp, "no-config.json"), "--codex-bin", codex]
+                "--config", os.path.join(tmp, "no-config.json"), "--codex-bin", codex,
+                "--data-class", "general", "--policy", CLASSES]
         # a) a stray file already in the tree: refuse before running anything
         stray = os.path.join(repo, "stray.txt")
         with open(stray, "w", encoding="utf-8") as f:
@@ -215,7 +284,8 @@ def review_refusal(paths, *extra):
     with tempfile.TemporaryDirectory() as tmp:
         repo, ctx = make_scratch_repo(tmp)
         return run([PY, "-B", REVIEW, "--repo", repo, "--paths"] + paths + ["--context", ctx,
-                   "--config", os.path.join(tmp, "no-config.json"), "--dry-run"] + list(extra))
+                   "--config", os.path.join(tmp, "no-config.json"), "--data-class", "general",
+                   "--policy", CLASSES, "--dry-run"] + list(extra))
 
 
 def check_review_pathspec_magic():
@@ -234,6 +304,74 @@ def check_review_metacharacters():
     results = [review_refusal(["app.py"], "--model", "x&calc") , review_refusal(["app.py"], "--effort", "high|x")]
     ok = all(rc == 2 and "may hold only" in out for rc, out in results)
     return ok, "; ".join("exit %d" % rc for rc, _ in results)
+
+
+def check_review_batch_paths(legacy=False):
+    if os.name != "nt":
+        return True, "Windows batch-path refusal does not apply on this platform"
+    details, passed = [], True
+    for field in ("repo", "codex_bin"):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo, ctx = make_scratch_repo(tmp)
+            if field == "repo":
+                moved = os.path.join(tmp, "R&D")
+                os.rename(repo, moved)
+                repo = moved
+            folder = os.path.join(tmp, "R&D" if field == "codex_bin" else "bin")
+            os.makedirs(folder)
+            codex = os.path.join(folder, "codex.cmd")
+            with open(codex, "w", encoding="utf-8") as f:
+                f.write("@exit /b 99\n")  # a stand-in for resolution only; dry runs never execute it
+            args = [PY, "-B", REVIEW, "--repo", repo, "--paths", "app.py", "--context", ctx,
+                    "--config", os.path.join(tmp, "no-config.json"), "--codex-bin", codex, "--dry-run"]
+            if not legacy:
+                args += ["--data-class", "general", "--policy", CLASSES]
+            rc, out = run(args)
+            dry = rc == 0 and "command (prompt on stdin):" in out and "DRY RUN" in out
+            if legacy:
+                assert dry, "BASE dry-run control did not succeed: %s" % out
+            refused = (rc == 2 and "may hold only" in out and "move the repository" in out
+                       and "--codex-bin" in out and "DRY RUN" not in out)
+            passed = passed and refused
+            details.append("%s exit=%d command-printed=%s refused=%s" % (field, rc, dry, refused))
+    return passed, "; ".join(details)
+
+
+def check_review_data_policy(review_path=None):
+    review_path = review_path or REVIEW
+    with tempfile.TemporaryDirectory() as tmp:
+        repo, ctx = make_scratch_repo(tmp)
+        with open(CLASSES, encoding="utf-8") as f:
+            policy = json.load(f)
+        policy["data_policy"]["data_classes"]["null-sensitive"] = {"sensitive": None}
+        policy["data_policy"]["allowed_providers"]["client-data"] = ["openai"]
+        policy["data_policy"]["allowed_providers"]["null-sensitive"] = ["different-provider"]
+        policy_path = os.path.join(tmp, "policy.json")
+        with open(policy_path, "w", encoding="utf-8") as f:
+            json.dump(policy, f)
+        custom = os.path.join(tmp, "custom-review.json")
+        with open(custom, "w", encoding="utf-8") as f:
+            json.dump({"review_provider": "different-provider"}, f)
+        default = os.path.join(tmp, "no-config.json")
+        cases = [
+            ("sensitive denied", "financials", policy_path, default, False, "review provider"),
+            ("public allowed", "general", policy_path, default, True, "DRY RUN"),
+            ("approved sensitive allowed", "client-data", policy_path, default, True, "DRY RUN"),
+            ("null sensitivity denied", "null-sensitive", policy_path, default, False, "review provider"),
+            ("configured provider allowed", "null-sensitive", policy_path, custom, True, "DRY RUN"),
+            ("unknown class", "unknown", policy_path, default, False, "unknown data class"),
+            ("missing policy", "general", os.path.join(tmp, "missing.json"), default, False,
+             "copy dispatcher/task-classes.example.json"),
+        ]
+        details, passed = [], True
+        for label, data_class, path, config, allowed, phrase in cases:
+            rc, out = run([PY, "-B", review_path, "--repo", repo, "--paths", "app.py", "--context", ctx,
+                           "--config", config, "--data-class", data_class, "--policy", path, "--dry-run"])
+            good = (rc == (0 if allowed else 2) and phrase in out
+                    and (allowed or (out.startswith("REFUSED:") and "DRY RUN" not in out)))
+            passed = passed and good
+            details.append("%s exit=%d expected=%s" % (label, rc, good))
+        return passed, "; ".join(details)
 
 
 NESTED_FENCE_CONTEXT = """## Scope
@@ -271,17 +409,17 @@ def check_review_other_drive():
     try:
         other = review.inside("C:\\work\\repo", "D:\\notes\\context.md", ntpath)
         same = review.inside("C:\\work\\repo", "c:\\WORK\\repo\\context.md", ntpath)
-    except Exception as e:  # the old check raised "Paths don't have the same drive"
+    except Exception as e:  # comparisons across drives must return False rather than raise
         return False, "raised %s: %s" % (type(e).__name__, e)
     return other is False and same is True, "D: outside=%s; same-drive inside=%s" % (not other, same)
 
 
 PARSE_SAMPLE = """Some preamble the reviewer wrote.
-FINDING | BLOCKING | tools/review.py:42 | the drive check raises instead of refusing
+FINDING | BLOCKING | tools/example.py:42 | the parser accepts an invalid input
 FINDING | NON-BLOCKING | README.md:7 | a sentence could be shorter
 VERDICT: NO BLOCKING
 """
-BROKEN_PARSE_SAMPLE = """FINDING - BLOCKING - tools/review.py:42 - the separators are wrong
+BROKEN_PARSE_SAMPLE = """FINDING - BLOCKING - tools/example.py:42 - the separators are wrong
 VERDICT: NO BLOCKING
 """
 
@@ -289,8 +427,8 @@ VERDICT: NO BLOCKING
 def check_review_parse_output(sample=PARSE_SAMPLE):
     review = load_review()
     findings, verdict = review.parse_output(sample)
-    want = [{"severity": "BLOCKING", "where": "tools/review.py:42",
-             "summary": "the drive check raises instead of refusing"},
+    want = [{"severity": "BLOCKING", "where": "tools/example.py:42",
+             "summary": "the parser accepts an invalid input"},
             {"severity": "NON-BLOCKING", "where": "README.md:7", "summary": "a sentence could be shorter"}]
     ok = findings == want and verdict == "BLOCKING"
     return ok, "%d finding(s) %s; verdict %s" % (
@@ -309,6 +447,7 @@ def check_injected_failure():
 
 
 CHECKS = [
+    ("version check", check_version),
     ("runbook gate selftest", check_gate_selftest),
     ("dispatcher valid pick", check_dispatch_pick),
     ("dispatcher stale-pack refusal", check_dispatch_stale),
@@ -320,6 +459,8 @@ CHECKS = [
     ("review refuses pathspec magic", check_review_pathspec_magic),
     ("review refuses --paths . (whole repo)", check_review_whole_repo),
     ("review refuses shell metacharacters", check_review_metacharacters),
+    ("review refuses Windows batch paths", check_review_batch_paths),
+    ("review data policy", check_review_data_policy),
     ("review reads a nested code fence", check_review_nested_fence),
     ("review: another drive is outside (ntpath)", check_review_other_drive),
     ("review parse_output reads a FINDING line", check_review_parse_output),

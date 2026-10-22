@@ -1,8 +1,8 @@
 {
-  "_comment": "FICTIONAL example data for tests and the smoke run. These models, providers and numbers do not exist. Never use this file for a real pick.",
+  "_comment": "FICTIONAL example data for tests and the smoke run. Model and provider names are invented, and the prices are invented test inputs rather than vendor quotes. Never use this file for a real pick.",
   "fictional": true,
   "generated_at": "2026-01-15T00:00:00Z",
-  "price_unit": "USD per million tokens, list price",
+  "price_unit": "USD per million tokens, fictional example prices",
   "sources": {
     "example-board": {"url": "https://example.com/leaderboard", "retrieved_at": "2026-01-15T00:00:00Z"},
     "example-pricing": {"url": "https://example.com/pricing", "retrieved_at": "2026-01-15T00:00:00Z"}
@@ -12,7 +12,7 @@
       "id": "model-a",
       "provider": "provider-x",
       "released": "2025-11-01",
-      "price": {"input_per_mtok": 3.0, "output_per_mtok": 15.0},
+      "price": {"input_per_mtok": 7.77, "output_per_mtok": 0.11},
       "scores": {
         "implementation": {"score": 80.0, "source": "example-board"},
         "code-review": {"score": 82.0, "source": "example-board"},
@@ -25,7 +25,7 @@
       "id": "model-b",
       "provider": "provider-y",
       "released": "2025-12-01",
-      "price": {"input_per_mtok": 1.0, "output_per_mtok": 5.0},
+      "price": {"input_per_mtok": 2.22, "output_per_mtok": 0.07},
       "scores": {
         "implementation": {"score": 74.0, "source": "example-board"},
         "code-review": {"score": 70.0, "source": "example-board"},
@@ -38,7 +38,7 @@
       "id": "model-c",
       "provider": "provider-x",
       "released": "2025-10-01",
-      "price": {"input_per_mtok": 0.2, "output_per_mtok": 1.0},
+      "price": {"input_per_mtok": 0.13, "output_per_mtok": 0.03},
       "scores": {
         "implementation": {"score": 55.0, "source": "example-board"},
         "code-review": {"score": 50.0, "source": "example-board"},

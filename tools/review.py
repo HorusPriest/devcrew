@@ -2,9 +2,9 @@
 """Run one independent Codex review round over a committed diff.
 
 Usage:
-  python tools/review.py --repo PATH --paths P [P ...] --context FILE --rounds FILE
+  python tools/review.py --repo PATH --paths P [P ...] --context FILE --rounds FILE --data-class CLASS
                          [--base main] [--head HEAD] [--model M] [--config FILE]
-                         [--codex-bin codex] [--effort high] [--timeout 3600] [--dry-run]
+                         [--codex-bin codex] [--effort high] [--timeout 3600] [--dry-run] [--policy FILE]
 
 What it does:
   1. Diffs BASE..HEAD limited to the positive list of --paths and pastes that
@@ -26,12 +26,15 @@ What it does:
      round left files behind. Like git status, this does not see files under
      gitignored paths.
 
---dry-run prints the command and the byte counts without running anything.
+--data-class is required. The policy defaults to dispatcher/task-classes.json;
+only an explicit sensitive=false permits every provider. Other classes require
+approval for review_provider (default openai) from the review config.
+--dry-run reads the git diff and prints the command without starting Codex.
 Keep --context, --rounds and every round's output OUTSIDE the repo; the tool
 refuses paths inside it.
 
 Config file (optional, JSON; default tools/review.config.json if present):
-  {"reviewer_model": "", "reasoning_effort": "high", "codex_bin": "codex"}
+  {"reviewer_model": "", "reasoning_effort": "high", "codex_bin": "codex", "review_provider": "openai"}
 
 Exit codes: 0 no blocking finding, 1 blocking finding(s), 2 usage or input
 error, 3 dirty tree before or after the round, 4 Codex failed or its verdict
@@ -50,6 +53,7 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CONFIG = os.path.join(HERE, "review.config.json")
+DEFAULT_POLICY = os.path.join(HERE, os.pardir, "dispatcher", "task-classes.json")
 SECTIONS = ["Scope", "Pinned decisions", "Not-mine"]
 MEMORY_OVERRIDES = [
     "features.memories=false",
@@ -99,6 +103,35 @@ def plain_value(label, value):
     if value is not None and not PLAIN_RE.match(value):
         raise Refusal("%s may hold only letters, digits and . _ : / - characters: %r" % (label, value))
     return value
+
+
+def batch_values(executable, values):
+    """Check supplied values before a Windows batch launcher can reparse them."""
+    if os.name != "nt" or not executable.lower().endswith((".cmd", ".bat")):
+        return
+    for label, value in values:
+        if value is not None and re.search(r'[&|<>^%!"()]', value):
+            raise Refusal("%s may hold only values without Windows shell metacharacters; "
+                          "move the repository or point --codex-bin at a path without them" % label)
+
+
+def review_allowed(path, data_class, provider):
+    """Apply the dispatcher's explicit-false sensitivity and provider approval semantics."""
+    if not os.path.isfile(path):
+        raise Refusal("data policy is missing; copy dispatcher/task-classes.example.json "
+                      "to dispatcher/task-classes.json and configure it")
+    with open(path, encoding="utf-8") as f:
+        config = json.load(f)
+    policy = config.get("data_policy")
+    if not isinstance(policy, dict):
+        raise Refusal("no data_policy in the policy file; configure it before a review")
+    classes = policy.get("data_classes") or {}
+    if data_class not in classes:
+        raise Refusal("unknown data class %r; declare it under data_policy.data_classes" % data_class)
+    if classes[data_class].get("sensitive", True) is False:
+        return True
+    approved = (policy.get("allowed_providers") or {}).get(data_class) or []
+    return provider in set(approved)
 
 
 def read_context(path):
@@ -243,6 +276,8 @@ def main(argv=None):
     ap.add_argument("--repo", required=True)
     ap.add_argument("--paths", nargs="+", required=True, help="positive list of paths to review")
     ap.add_argument("--context", required=True, help="file with Scope, Pinned decisions and Not-mine")
+    ap.add_argument("--data-class", required=True, help="data class declared in the review policy")
+    ap.add_argument("--policy", default=DEFAULT_POLICY, help="data policy (default: dispatcher/task-classes.json)")
     ap.add_argument("--rounds", help="JSON rounds file (required unless --dry-run)")
     ap.add_argument("--base", default="main")
     ap.add_argument("--head", default="HEAD")
@@ -280,9 +315,18 @@ def run(a):
         if whole_repo(p):
             raise Refusal("--paths %s names the whole repo; list the paths the change touches" % p)
     cfg = load_config(a.config)
-    model = plain_value("--model", a.model or str(cfg.get("reviewer_model", "")).strip() or None)
-    effort = plain_value("--effort", a.effort or str(cfg.get("reasoning_effort", "")).strip() or "high")
+    model = a.model or str(cfg.get("reviewer_model", "")).strip() or None
+    effort = a.effort or str(cfg.get("reasoning_effort", "")).strip() or "high"
     codex_bin = a.codex_bin or str(cfg.get("codex_bin", "")).strip() or "codex"
+    executable = shutil.which(codex_bin) or codex_bin
+    batch_values(executable, [("supplied repository path", a.repo), ("repository path", repo), ("codex_bin", codex_bin),
+                              ("resolved codex_bin", executable), ("--model", model), ("--effort", effort)])
+    model, effort = plain_value("--model", model), plain_value("--effort", effort)
+    provider = cfg.get("review_provider", "openai")
+    if not isinstance(provider, str) or not provider:
+        raise Refusal("review_provider must be a non-empty provider name")
+    if not review_allowed(a.policy, a.data_class, provider):
+        raise Refusal("data class %r is not approved for review provider %r" % (a.data_class, provider))
     context = read_context(a.context)
     rounds = load_rounds(a.rounds)
 
@@ -333,7 +377,7 @@ def run(a):
     timed_out = False
     try:
         # shutil.which honours PATHEXT, so an npm-installed codex.cmd is found on Windows
-        exe = [shutil.which(cmd[0]) or cmd[0]] + cmd[1:]
+        exe = [executable] + cmd[1:]
         proc = subprocess.run(exe, input=prompt.encode("utf-8"), capture_output=True, timeout=a.timeout)
         out_b, err_b, rc = proc.stdout, proc.stderr, proc.returncode
     except FileNotFoundError:
